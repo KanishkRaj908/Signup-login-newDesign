@@ -38,7 +38,8 @@ export function ResetPassword() {
       clearTimeout(timer.current);
       setPassword("");
       setConfirm("");
-      setTouched(false);
+      // `touched` is left alone: the checklist already hides while the field is unfocused,
+      // and the field may stay focused across the reset (so no new focus event would set it)
       setAttempted(false);
       setLoading(false);
     },

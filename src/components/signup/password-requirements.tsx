@@ -1,6 +1,6 @@
 import { CheckCircleIcon, CircleIcon, XCircleIcon } from "@/components/icons";
 import { cn } from "@/lib/cn";
-import { PASSWORD_RULES } from "@/lib/password";
+import { checkPassword, PASSWORD_RULES } from "@/lib/password";
 
 type Props = {
   password: string;
@@ -13,6 +13,7 @@ type Props = {
 
 /** Live checklist of password rules, shown beside the password field (below it on small screens). */
 export function PasswordRequirements({ password, showErrors, collapsed, id }: Props) {
+  const results = checkPassword(password);
   return (
     <ul
       id={id}
@@ -28,7 +29,7 @@ export function PasswordRequirements({ password, showErrors, collapsed, id }: Pr
       )}
     >
       {PASSWORD_RULES.map((rule) => {
-        const met = rule.test(password);
+        const met = results[rule.id];
         const failed = !met && showErrors;
         const Icon = met ? CheckCircleIcon : failed ? XCircleIcon : CircleIcon;
         return (

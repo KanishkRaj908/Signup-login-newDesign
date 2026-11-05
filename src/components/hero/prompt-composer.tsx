@@ -37,6 +37,9 @@ export function PromptComposer() {
   const [value, setValue] = useState("");
   const [active, setActive] = useState(false);
   const [multiline, setMultiline] = useState(false);
+  /** text taller than the box: it scrolls instead of being clipped */
+  const [overflowing, setOverflowing] = useState(false);
+  const ghost = useRef<HTMLDivElement>(null);
   /** recomputed only where the original re-renders (input, Tab, launch, recording start) */
   const [suggestion, setSuggestion] = useState("");
   const [files, setFiles] = useState<Attachment[]>([]);
@@ -56,15 +59,24 @@ export function PromptComposer() {
     setSuggestion(isRecording ? "" : suggestionFor(v)); // no ghost text while talking
   }
 
-  // auto-grow up to 132px; 2+ lines move the controls to a bottom row
+  // auto-grow up to 132px, then scroll; 2+ lines move the controls to a bottom row
   useLayoutEffect(() => {
     const el = input.current;
     if (!el || !grown.current) return;
+    const top = el.scrollTop;
     el.style.height = "auto";
     const sh = el.scrollHeight;
     el.style.height = Math.min(sh, MAX_HEIGHT) + "px";
+    el.scrollTop = top; // measuring at "auto" height resets the scroll position
     setMultiline(sh > 48);
+    setOverflowing(sh > MAX_HEIGHT);
+    syncGhost();
   }, [value, suggestion, recording]);
+
+  /** keep the ghost-suggestion layer scrolled in step with the text */
+  function syncGhost() {
+    if (ghost.current && input.current) ghost.current.scrollTop = input.current.scrollTop;
+  }
 
   function launch() {
     const v = value.trim();
@@ -104,7 +116,16 @@ export function PromptComposer() {
   const hasFiles = files.length > 0;
 
   return (
-    <div className="w-[min(680px,100%)]" data-content="">
+    <div className="relative isolate w-[min(680px,100%)]" data-content="">
+      {/* soft colour glow rising behind the box while it's active */}
+      <div
+        aria-hidden="true"
+        className={cn(
+          "absolute -z-1 -inset-x-4 -top-16 h-32 pointer-events-none blur-2xl opacity-0 scale-95 transition-[opacity,transform] duration-700 ease-out-soft",
+          "bg-[radial-gradient(38%_75%_at_20%_65%,rgba(238,196,244,.95),transparent_75%),radial-gradient(36%_85%_at_50%_75%,rgba(190,180,246,1),transparent_75%),radial-gradient(38%_75%_at_80%_65%,rgba(176,206,250,1),transparent_75%)]",
+          active && "opacity-100 scale-100 dark:opacity-35",
+        )}
+      />
       <div
         className={cn(
           "relative rounded-3xl bg-box-rest border border-border-secondary shadow-none",
@@ -157,6 +178,7 @@ export function PromptComposer() {
 
             <div className={cn("relative flex-[1_1_auto] min-w-0 order-2 below-720:order-0 below-720:basis-full", multiline && "order-0 flex-[1_1_100%]")}>
               <div
+                ref={ghost}
                 className="absolute inset-0 px-1.5 py-2 text-[16px] leading-6 whitespace-pre-wrap [word-break:break-word] overflow-hidden pointer-events-none font-medium text-left"
                 aria-hidden="true"
               >
@@ -166,7 +188,12 @@ export function PromptComposer() {
               <textarea
                 ref={input}
                 id="pinput"
-                className="relative block w-full border-0 outline-none bg-transparent [font-family:inherit] text-[16px] leading-6 text-ink font-medium px-1.5 py-2 m-0 resize-none overflow-hidden h-10 below-720:min-h-16 max-h-[132px] text-left transition-[height] duration-200 placeholder:text-ph-rest placeholder:font-medium"
+                className={cn(
+                  "relative block w-full border-0 outline-none bg-transparent [font-family:inherit] text-[16px] leading-6 text-ink font-medium px-1.5 py-2 m-0 resize-none overflow-hidden h-10 below-720:min-h-16 max-h-[132px] text-left transition-[height] duration-200 placeholder:text-ph-rest placeholder:font-medium",
+                  // a hidden scrollbar keeps the wrap width identical to the ghost layer's
+                  overflowing && "overflow-y-auto overscroll-contain scrollbar-none",
+                )}
+                onScroll={syncGhost}
                 rows={1}
                 autoComplete="off"
                 spellCheck={false}

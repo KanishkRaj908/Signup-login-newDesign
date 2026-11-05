@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ComponentType, type FormEvent, type SVGProps } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type FormEvent, type SVGProps } from "react";
 import { useRouter } from "next/navigation";
 import {
   BuildingIcon, DiamondIcon, GraduationIcon, PaletteIcon, ProductIcon, TargetIcon, TerminalIcon, UserIcon,
@@ -72,7 +72,20 @@ export function Onboarding() {
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const nameRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => () => clearTimeout(timer.current), []);
+  // Next keeps a page's state when you navigate away (it's hidden, not unmounted), so a
+  // finished onboarding would reopen on "ready". Start over whenever the page is left.
+  useLayoutEffect(
+    () => () => {
+      clearTimeout(timer.current);
+      setStep("confirming");
+      setName("");
+      setNameError(undefined);
+      setRole(undefined);
+      setTeam(undefined);
+      setPicking(false);
+    },
+    [],
+  );
   useEffect(() => {
     const intro = INTRO_MS[step];
     if (intro) timer.current = setTimeout(() => setStep(intro[1]), intro[0]);

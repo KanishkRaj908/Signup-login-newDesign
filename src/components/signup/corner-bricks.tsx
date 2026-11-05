@@ -59,33 +59,44 @@ export function CornerBricks({ open, openKey, assembled, hidden }: Props) {
 
   useLayoutEffect(() => {
     if (!assembled) return;
+    let raf = 0;
     function place() {
-      if (!frame.current) return;
-      const f = frame.current.getBoundingClientRect();
+      const fr = frame.current;
+      if (!fr) return;
       // cluster's top-left, centred in the frame
-      const ox = f.width / 2 - CLUSTER.w / 2;
-      const oy = f.height / 2 - CLUSTER.h / 2;
+      const ox = fr.clientWidth / 2 - CLUSTER.w / 2;
+      const oy = fr.clientHeight / 2 - CLUSTER.h / 2;
       const next = BRICKS.map((b, i) => {
-        const el = refs.current[i]!;
-        const r = el.getBoundingClientRect();
+        // offsetLeft/Top give the resting corner position, ignoring any transform already applied
+        // (measuring the on-screen box would start from wherever the brick currently is)
+        const el = refs.current[i];
+        const x = el?.offsetLeft ?? 0, y = el?.offsetTop ?? 0;
         const delay = i * STAGGER_MS;
         if (b.turns) {
           // rotate about the body's centre; the flat body is 2 studs wide, 1 tall
-          const cx = r.left - f.left + INSET + UNIT / 2, cy = r.top - f.top + INSET + UNIT;
+          const cx = x + INSET + UNIT / 2, cy = y + INSET + UNIT;
           const tx = ox + b.slot.x * UNIT + UNIT, ty = oy + b.slot.y * UNIT + UNIT / 2;
           return { transform: `translate(${tx - cx}px,${ty - cy}px) rotate(-90deg)`, delay };
         }
-        const dx = ox + b.slot.x * UNIT - (r.left - f.left + INSET);
-        const dy = oy + b.slot.y * UNIT - (r.top - f.top + INSET);
+        const dx = ox + b.slot.x * UNIT - (x + INSET);
+        const dy = oy + b.slot.y * UNIT - (y + INSET);
         return { transform: `translate(${dx}px,${dy}px)`, delay };
       });
       const g = BRICKS.findIndex((b) => b.turns);
       setPlacements(next);
       setFlat({ left: ox + BRICKS[g].slot.x * UNIT - INSET, top: oy + BRICKS[g].slot.y * UNIT - INSET, delay: next[g].delay });
     }
-    place();
+    // let the bricks paint once at their corners (on phones they only just became visible),
+    // so the glide always starts there
+    raf = requestAnimationFrame(() => (raf = requestAnimationFrame(place)));
     window.addEventListener("resize", place);
-    return () => window.removeEventListener("resize", place);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", place);
+      // forget the cluster so the next assembly can't start from the old centre
+      setPlacements(null);
+      setFlat(null);
+    };
   }, [assembled]);
 
   const settled = assembled && placements;

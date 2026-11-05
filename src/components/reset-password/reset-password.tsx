@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { PageLogo } from "@/components/page-logo";
 import { PasswordRequirements } from "@/components/signup/password-requirements";
@@ -30,8 +30,20 @@ export function ResetPassword() {
 
   useEffect(() => {
     passwordRef.current?.focus();
-    return () => clearTimeout(timer.current);
   }, []);
+
+  // the page is kept (hidden) after navigating away; start blank on the next visit
+  useLayoutEffect(
+    () => () => {
+      clearTimeout(timer.current);
+      setPassword("");
+      setConfirm("");
+      setTouched(false);
+      setAttempted(false);
+      setLoading(false);
+    },
+    [],
+  );
 
   const valid = meetsAllRules(password);
   const matches = confirm === password;

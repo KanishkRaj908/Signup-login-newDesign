@@ -93,7 +93,8 @@ export function Signup() {
         <p className="sr-only" role="status">
           {created ? "Your account has been created." : ""}
         </p>
-        <CornerBricks open={open} openKey={openKey} assembled={created} hidden={inbox} />
+        {/* stays assembled while the overlay fades out; reopening (new key) puts them back in the corners */}
+        <CornerBricks open={open} openKey={openKey} assembled={createdAt === openKey} hidden={inbox} />
 
         {/* equal spacers centre the card; the top one keeps it clear of the header when space runs out */}
         <div

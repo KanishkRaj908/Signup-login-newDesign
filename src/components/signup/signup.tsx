@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ComponentProps } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
 import { useRouter } from "next/navigation";
 import { LogoMark } from "@/components/brand";
 import { AppleIcon, CloseIcon, GitHubIcon, GoogleIcon } from "@/components/icons";
@@ -39,6 +39,8 @@ export function Signup() {
   const [createdAt, setCreatedAt] = useState<number | null>(null);
   // also cleared once closed, so a page restored after onboarding doesn't replay the assembly
   const created = open && createdAt === openKey;
+  // not tied to `open`, so the form stays hidden while the overlay closes on the way to onboarding
+  const assembled = createdAt === openKey;
   const login = mode === "login";
   const inbox = mode === "inbox";
   const router = useRouter();
@@ -48,16 +50,24 @@ export function Signup() {
     if (!created) return;
     // drop the on-screen keyboard so the bricks gather in the full-height screen
     (document.activeElement as HTMLElement | null)?.blur();
-    const t = setTimeout(() => {
-      router.push("/onboarding");
-      closeSignup();
-    }, 3400);
+    const t = setTimeout(() => router.push("/onboarding"), 3400);
     return () => clearTimeout(t);
-  }, [created, router, closeSignup]);
+  }, [created, router]);
+
+  // Close only once the page is left (Next hides it then): closing before the route switches
+  // fades the overlay out over the home page for a moment, which reads as a flash.
+  // Deferred, and cancelled by a remount: React's dev double-mount (and arriving here with the
+  // overlay just opened, e.g. "Sign up again") must not close it.
+  const pendingClose = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useLayoutEffect(() => {
+    clearTimeout(pendingClose.current);
+    return () => {
+      pendingClose.current = setTimeout(closeSignup);
+    };
+  }, [closeSignup]);
 
   function openResetLink() {
     router.push("/reset-password");
-    closeSignup();
   }
 
   return (
@@ -94,15 +104,15 @@ export function Signup() {
           {created ? "Your account has been created." : ""}
         </p>
         {/* stays assembled while the overlay fades out; reopening (new key) puts them back in the corners */}
-        <CornerBricks open={open} openKey={openKey} assembled={createdAt === openKey} hidden={inbox} />
+        <CornerBricks open={open} openKey={openKey} assembled={assembled} hidden={inbox} />
 
         {/* equal spacers centre the card; the top one keeps it clear of the header when space runs out */}
         <div
           className={cn(
             "flex-1 flex flex-col items-center p-6 before:content-[''] before:flex-1 before:min-h-10 after:content-[''] after:flex-1",
-            created && "opacity-0 pointer-events-none transition-opacity duration-500",
+            assembled && "opacity-0 pointer-events-none transition-opacity duration-500",
           )}
-          aria-hidden={created || undefined}
+          aria-hidden={assembled || undefined}
         >
           {inbox ? (
             <div key="inbox" className="w-full flex justify-center animate-[flFadeIn_.3s_ease_both]">
@@ -152,7 +162,7 @@ export function Signup() {
         <p
           className={cn(
             "text-center text-[13px] leading-[18px] text-tertiary pt-0 px-6 pb-4 [&_a]:text-ink [&_a]:font-semibold [&_a]:no-underline [&_a:hover]:underline",
-            (created || inbox) && "opacity-0 pointer-events-none transition-opacity duration-500",
+            (assembled || inbox) && "opacity-0 pointer-events-none transition-opacity duration-500",
           )}
           aria-hidden={inbox || undefined}
         >

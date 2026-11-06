@@ -104,9 +104,13 @@ export function CornerBricks({ open, openKey, assembled, hidden }: Props) {
   return (
     <div
       ref={frame}
-      className={cn("absolute inset-0 pointer-events-none below-1100:fixed", hidden && "opacity-0 transition-opacity duration-300")}
+      className={cn(
+        "absolute inset-0 pointer-events-none below-1100:fixed",
+        hidden && "opacity-0 transition-opacity duration-300",
+        // once the cluster has sat for a beat, fade it out just before the hand-off to onboarding (at 3.4s)
+        assembled && "opacity-0 transition-opacity duration-300 delay-3000",
+      )}
     >
-
       {ORDER.map((i) => {
         const b = BRICKS[i];
         const p = settled ? placements[i] : undefined;

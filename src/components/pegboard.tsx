@@ -27,11 +27,17 @@ export function Pegboard() {
       if (t?.closest?.(EXCLUDE)) return hide();
       peekAt(e.clientX, e.clientY);
     }
+    // the board is fixed to the screen; shift its circles with the scroll so they stay
+    // anchored to the page, where the hero bricks snap onto them
+    const onScroll = () => (peg.style.backgroundPosition = `${-scrollX}px ${-scrollY}px`);
+    onScroll();
     document.addEventListener("pointermove", onMove);
     document.documentElement.addEventListener("pointerleave", hide);
+    window.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       document.removeEventListener("pointermove", onMove);
       document.documentElement.removeEventListener("pointerleave", hide);
+      window.removeEventListener("scroll", onScroll);
     };
   }, []);
 
@@ -40,7 +46,8 @@ export function Pegboard() {
       ref={ref}
       id={PEG_ID}
       aria-hidden="true"
-      className="fixed inset-0 -z-1 pointer-events-none opacity-0 bg-pegboard dark:bg-pegboard-dark mask-spotlight transition-opacity duration-350 data-peek:opacity-100"
+      // phones show the bricks at 75%, so the circles shrink to match (a brick still covers 2×2)
+      className="fixed inset-0 -z-1 pointer-events-none opacity-0 bg-pegboard dark:bg-pegboard-dark below-720:[background-size:24px_24px] mask-spotlight transition-opacity duration-350 data-peek:opacity-100"
     />
   );
 }

@@ -1,9 +1,13 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { LegoBrick, type BrickColor } from "@/components/ui/lego-brick";
 import { cn } from "@/lib/cn";
 
-/** Brick SVGs draw a 24px-per-stud body starting 2.1px into the canvas (the rest is shadow). */
+/**
+ * Each brick sits in a box the size of the old SVG canvas (its shadow room), 2.1px in from the
+ * box's top-left; the positions and assembly maths below are in terms of that box.
+ */
 const INSET = 2.1;
 const UNIT = 24;
 /** Assembled cluster: 3 studs wide, 2 tall. */
@@ -12,7 +16,10 @@ const MOVE_MS = 1800;
 const STAGGER_MS = 160;
 
 type Brick = {
-  src: string;
+  color: BrickColor;
+  cols: number;
+  rows: number;
+  /** box size, shadow room included */
   w: number;
   h: number;
   /** resting corner (fly-in destination) */
@@ -26,10 +33,10 @@ type Brick = {
 
 const BRICKS: Brick[] = [
   // phones (where the bricks only show for the assembly) start them in the screen corners, clear of the card
-  { src: "/assets/24/blue.svg", w: 73, h: 48, pos: "top-[127px] right-[108px] below-760:top-24 below-760:right-6", fly: "animate-[flyTR_1.05s_cubic-bezier(.5,.05,.2,1)_.26s_both]", slot: { x: 1, y: 1 } },
-  { src: "/assets/24/yellow.svg", w: 48, h: 48, pos: "top-[126px] left-[126px] below-760:top-20 below-760:left-6", fly: "animate-[flyTL_1.05s_cubic-bezier(.5,.05,.2,1)_.14s_both]", slot: { x: 0, y: 1 } },
-  { src: "/assets/24/Green.svg", w: 48, h: 73, pos: "bottom-[105px] left-[150px] below-760:bottom-20 below-760:left-8", fly: "animate-[flyBL_1.05s_cubic-bezier(.5,.05,.2,1)_.38s_both]", slot: { x: 0, y: 0 }, turns: true },
-  { src: "/assets/24/yellow.svg", w: 48, h: 48, pos: "bottom-[106px] right-[108px] below-760:bottom-24 below-760:right-8", fly: "animate-[flyBR_1.05s_cubic-bezier(.5,.05,.2,1)_.5s_both]", slot: { x: 2, y: 0 } },
+  { color: "blue", cols: 2, rows: 1, w: 73, h: 48, pos: "top-[127px] right-[108px] below-760:top-24 below-760:right-6", fly: "animate-[flyTR_1.05s_cubic-bezier(.5,.05,.2,1)_.26s_both]", slot: { x: 1, y: 1 } },
+  { color: "yellow", cols: 1, rows: 1, w: 48, h: 48, pos: "top-[126px] left-[126px] below-760:top-20 below-760:left-6", fly: "animate-[flyTL_1.05s_cubic-bezier(.5,.05,.2,1)_.14s_both]", slot: { x: 0, y: 1 } },
+  { color: "green", cols: 1, rows: 2, w: 48, h: 73, pos: "bottom-[105px] left-[150px] below-760:bottom-20 below-760:left-8", fly: "animate-[flyBL_1.05s_cubic-bezier(.5,.05,.2,1)_.38s_both]", slot: { x: 0, y: 0 }, turns: true },
+  { color: "yellow", cols: 1, rows: 1, w: 48, h: 48, pos: "bottom-[106px] right-[108px] below-760:bottom-24 below-760:right-8", fly: "animate-[flyBR_1.05s_cubic-bezier(.5,.05,.2,1)_.5s_both]", slot: { x: 2, y: 0 } },
 ];
 // render order matches the original markup (TL, TR, BL, BR) so the fly-in is unchanged
 const ORDER = [1, 0, 2, 3];
@@ -53,7 +60,7 @@ type Props = {
  */
 export function CornerBricks({ open, openKey, assembled, hidden }: Props) {
   const frame = useRef<HTMLDivElement>(null);
-  const refs = useRef<(HTMLImageElement | null)[]>([]);
+  const refs = useRef<(HTMLDivElement | null)[]>([]);
   const [placements, setPlacements] = useState<Placement[] | null>(null);
   const [flat, setFlat] = useState<{ left: number; top: number; delay: number } | null>(null);
 
@@ -127,42 +134,34 @@ export function CornerBricks({ open, openKey, assembled, hidden }: Props) {
         }
         return (
           // keyed by the open count so the fly-in replays on every open
-          // eslint-disable-next-line @next/next/no-img-element -- decorative static SVG
-          <img
+          <div
             key={`${openKey}-${i}`}
             ref={(el) => {
               refs.current[i] = el;
             }}
             className={cn(
-              "absolute block pointer-events-none opacity-0 will-change-[transform,opacity] below-760:hidden",
+              "absolute pointer-events-none opacity-0 will-change-[transform,opacity] below-760:hidden",
               b.pos,
               open && !assembled && [b.fly, "motion-reduce:animate-none! motion-reduce:opacity-100"],
               assembled && "opacity-100 below-760:block",
               p && "transition-[transform,opacity] [transition-duration:1.8s,.35s] [transition-timing-function:cubic-bezier(.3,0,.15,1),ease]",
             )}
             style={style}
-            src={b.src}
-            width={b.w}
-            height={b.h}
-            alt=""
             aria-hidden="true"
-            draggable={false}
-          />
+          >
+            <LegoBrick size="sm" color={b.color} cols={b.cols} rows={b.rows} className="absolute" style={{ left: INSET, top: INSET }} />
+          </div>
         );
       })}
       {settled && flat && (
-        // eslint-disable-next-line @next/next/no-img-element -- decorative static SVG
-        <img
+        <div
           key={`${openKey}-flat`}
-          className="absolute block pointer-events-none animate-[flFadeIn_.35s_ease_both]"
+          className="absolute pointer-events-none animate-[flFadeIn_.35s_ease_both]"
           style={{ left: flat.left, top: flat.top, width: 73, height: 48, animationDelay: `${flat.delay + MOVE_MS}ms` }}
-          src="/assets/24/green-h.svg"
-          width={73}
-          height={48}
-          alt=""
           aria-hidden="true"
-          draggable={false}
-        />
+        >
+          <LegoBrick size="sm" color="green" cols={2} className="absolute" style={{ left: INSET, top: INSET }} />
+        </div>
       )}
     </div>
   );

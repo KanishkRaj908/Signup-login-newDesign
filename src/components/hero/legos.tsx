@@ -1,52 +1,44 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { mergeProps, useFocusRing, useHover, useMove } from "react-aria";
 import { peekAt } from "@/components/pegboard";
+import { brickSize, LegoBrick, type BrickColor } from "@/components/ui/lego-brick";
 import { playBrickClick, preloadBrickSound } from "@/lib/brick-sound";
 import { cn } from "@/lib/cn";
 
 const GRID = 32;
 
 type BrickSpec = {
-  src: string;
-  width: number;
-  height: number;
-  /** position + entrance delay of the brick image */
+  color: BrickColor;
+  /** studs down (all hero bricks are one stud wide) */
+  rows: number;
+  /** home position, shared by the brick and its dashed slot */
+  pos: string;
+  /** stacking + entrance delay */
   className: string;
-  /** dashed home slot shown while dragging */
-  slotClassName: string;
-  /** offset + width of the visible brick inside the transparent SVG canvas */
-  inset: number;
-  visibleWidth: number;
+  /** tint of the dashed home slot shown while dragging */
+  tint: string;
 };
 
 const BRICKS: BrickSpec[] = [
-  {
-    src: "/assets/yellow.svg", width: 127, height: 127,
-    className: "-left-1.5 -top-1.5 below-720:left-[22px] below-720:top-[60px] w-[127px] h-[127px] z-2 [animation-delay:.15s]",
-    slotClassName: "left-0 top-0 below-720:left-7 below-720:top-[66px] w-16 h-16 bg-[rgba(255,208,44,.16)]",
-    inset: 6, visibleWidth: 64,
-  },
-  {
-    src: "/assets/green.svg", width: 127, height: 127,
-    className: "left-[190px] below-720:left-[220px] top-[31px] w-[127px] h-[127px] z-2 [animation-delay:.21s]",
-    slotClassName: "left-[195px] below-720:left-[225px] top-9 w-16 h-16 bg-[rgba(0,187,134,.16)]",
-    inset: 5, visibleWidth: 64,
-  },
-  {
-    src: "/assets/blue.svg", width: 171, height: 232,
-    className: "left-[120px] top-7 w-[171px] h-[232px] z-1 [animation-delay:.27s]",
-    slotClassName: "left-32 top-9 w-16 h-[125px] bg-[rgba(1,84,205,.16)]",
-    inset: 8, visibleWidth: 64,
-  },
+  { color: "yellow", rows: 1, pos: "left-0 top-0 below-720:left-7 below-720:top-[66px]", className: "z-2 [animation-delay:.15s]", tint: "bg-[rgba(255,208,44,.16)]" },
+  { color: "green", rows: 1, pos: "left-[195px] below-720:left-[225px] top-9", className: "z-2 [animation-delay:.21s]", tint: "bg-[rgba(0,187,134,.16)]" },
+  { color: "blue", rows: 2, pos: "left-32 top-9", className: "z-1 [animation-delay:.27s]", tint: "bg-[rgba(1,84,205,.16)]" },
 ];
+
+type Point = { x: number; y: number };
+type Box = { left: number; top: number; right: number; bottom: number };
+
+const snap = (p: Point): Point => ({ x: Math.round(p.x / GRID) * GRID, y: Math.round(p.y / GRID) * GRID });
+const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(v, max));
 
 /** Rects of page content a brick may not be dropped on. */
 function contentRects() {
   return Array.from(document.querySelectorAll("[data-content]"), (e) => e.getBoundingClientRect());
 }
 
-function overlaps(r: DOMRect, rects: DOMRect[]) {
+function overlaps(r: Box, rects: Box[]) {
   return rects.some((b) => r.right > b.left + 4 && r.left < b.right - 4 && r.bottom > b.top + 4 && r.top < b.bottom - 4);
 }
 
@@ -60,12 +52,22 @@ function dropBounds() {
   return { lx, rx, top: f.top + 70, bottom: f.top + Math.min(f.height - 12, 796) };
 }
 
-/** Whether the brick's visible body sits between the rails and clear of page content. */
-function fits(el: HTMLElement, spec: BrickSpec) {
-  const r = el.getBoundingClientRect();
+/**
+ * Where the brick would sit on screen at offset `p`, ignoring hover/drag scale. `k` is the brick
+ * area's own scale (75% on phones): screen pixels per offset pixel.
+ */
+function screenBox(el: HTMLElement, p: Point) {
+  const area = el.offsetParent as HTMLElement;
+  const ar = area.getBoundingClientRect();
+  const k = ar.width / area.offsetWidth;
+  const left = ar.left + (el.offsetLeft + p.x) * k, top = ar.top + (el.offsetTop + p.y) * k;
+  return { left, top, right: left + el.offsetWidth * k, bottom: top + el.offsetHeight * k, k };
+}
+
+/** Whether a brick at `b` sits inside the drop area and clear of page content. */
+function fits(b: Box) {
   const rb = dropBounds();
-  const left = r.left + spec.inset, right = left + spec.visibleWidth;
-  return left >= rb.lx && right <= rb.rx && !overlaps(r, contentRects());
+  return b.left >= rb.lx && b.right <= rb.rx && b.top >= rb.top && b.bottom <= rb.bottom && !overlaps(b, contentRects());
 }
 
 /** Runs `fn` now, on every (frame-throttled) resize, and whenever Next shows the page again (it re-runs effects then). */
@@ -91,15 +93,17 @@ function useOnResize(fn: () => void) {
 }
 
 type Phase = "idle" | "dragging" | "settling";
+/** Captured when a drag starts: where it began and the offsets the brick may move between. */
+type Drag = { start: Point; k: number; min: Point; max: Point };
 
 function Brick({ spec }: { spec: BrickSpec }) {
-  const [offset, setOffset] = useState<{ x: number; y: number } | null>(null);
-  const [hover, setHover] = useState(false);
+  const [offset, setOffset] = useState<Point>({ x: 0, y: 0 });
   const [phase, setPhase] = useState<Phase>("idle");
-  const [slot, setSlot] = useState<{ x: number; y: number } | null>(null);
-  const pos = useRef({ x: 0, y: 0 });
+  const [slot, setSlot] = useState<Point | null>(null);
+  const pos = useRef<Point>({ x: 0, y: 0 });
+  const drag = useRef<Drag | null>(null);
   const settleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const img = useRef<HTMLImageElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => () => clearTimeout(settleTimer.current), []);
 
@@ -113,89 +117,94 @@ function Brick({ spec }: { spec: BrickSpec }) {
 
   // a narrower window pulls the rails in, which can leave a moved brick outside them: send it home
   useOnResize(() => {
-    const el = img.current;
-    if (!el?.offsetParent || (pos.current.x === 0 && pos.current.y === 0) || fits(el, spec)) return;
+    const el = ref.current;
+    if (!el?.offsetParent || (pos.current.x === 0 && pos.current.y === 0) || fits(screenBox(el, pos.current))) return;
     pos.current = { x: 0, y: 0 };
     settle();
   });
 
-  const dragging = phase === "dragging";
-  const scale = dragging ? 1.05 : hover ? 1.03 : 1;
-  // `translate`/`scale` rather than `transform`, so they add to the entrance animation's transform:
-  // when Next re-shows the page the animation replays, and a moved brick rises in at its new spot
-  const o = offset ?? { x: 0, y: 0 };
-
-  function onPointerDown(e: ReactPointerEvent<HTMLImageElement>) {
-    e.preventDefault();
-    const el = e.currentTarget;
-    clearTimeout(settleTimer.current);
-    setPhase("dragging");
-    setSlot({ x: 0, y: 0 });
-
-    const sx = e.clientX, sy = e.clientY;
-    const start = { ...pos.current };
-    const r0 = el.getBoundingClientRect();
-    const baseLeft = r0.left - start.x, baseTop = r0.top - start.y, w = r0.width, h = r0.height;
-    const rb = dropBounds();
-    try { el.setPointerCapture(e.pointerId); } catch {}
-
-    function move(ev: PointerEvent) {
+  // mouse, touch and pen drag, plus arrow keys (one grid step per press) when focused
+  const { moveProps } = useMove({
+    onMoveStart() {
+      const el = ref.current!;
+      clearTimeout(settleTimer.current);
+      setPhase("dragging");
+      setSlot(snap(pos.current));
       // free drag past the rails; only an off-screen guard applies
-      let x = start.x + (ev.clientX - sx), y = start.y + (ev.clientY - sy);
-      x = Math.max(rb.lx - 180 - baseLeft, Math.min(x, rb.rx + 180 - w - baseLeft));
-      y = Math.max(rb.top - baseTop, Math.min(y, rb.bottom - h - baseTop));
-      pos.current = { x, y };
-      setOffset({ x, y });
-      setSlot({ x: Math.round(x / GRID) * GRID, y: Math.round(y / GRID) * GRID });
-      peekAt(ev.clientX, ev.clientY); // glow follows the brick
-    }
-    function up() {
-      setHover(false);
-      if (!fits(el, spec)) pos.current = start; // ease back to the previous spot
-      else {
-        pos.current = { x: Math.round(pos.current.x / GRID) * GRID, y: Math.round(pos.current.y / GRID) * GRID };
+      const home = screenBox(el, { x: 0, y: 0 }), rb = dropBounds(), k = home.k;
+      const w = home.right - home.left, h = home.bottom - home.top;
+      drag.current = {
+        start: { ...pos.current },
+        k,
+        min: { x: (rb.lx - 180 - home.left) / k, y: (rb.top - home.top) / k },
+        max: { x: (rb.rx + 180 - w - home.left) / k, y: (rb.bottom - h - home.top) / k },
+      };
+    },
+    onMove(e) {
+      const d = drag.current;
+      if (!d) return;
+      // pointer deltas are screen pixels; the brick area may be scaled, so convert
+      const step = e.pointerType === "keyboard" ? GRID : 1 / d.k;
+      const p = { x: clamp(pos.current.x + e.deltaX * step, d.min.x, d.max.x), y: clamp(pos.current.y + e.deltaY * step, d.min.y, d.max.y) };
+      pos.current = p;
+      setOffset(p);
+      setSlot(snap(p));
+      const b = screenBox(ref.current!, p);
+      peekAt((b.left + b.right) / 2, (b.top + b.bottom) / 2); // glow follows the brick
+    },
+    onMoveEnd() {
+      const d = drag.current;
+      drag.current = null;
+      if (!d) return;
+      const snapped = snap(pos.current);
+      if (fits(screenBox(ref.current!, snapped))) {
+        pos.current = snapped;
         playBrickClick();
-      }
+      } else pos.current = d.start; // ease back to the previous spot
       settle();
       setSlot(null);
-      el.removeEventListener("pointermove", move);
-      el.removeEventListener("pointerup", up);
-      el.removeEventListener("pointercancel", up);
-    }
-    el.addEventListener("pointermove", move);
-    el.addEventListener("pointerup", up);
-    el.addEventListener("pointercancel", up);
-  }
+    },
+  });
+  const dragging = phase === "dragging";
+  const { hoverProps, isHovered } = useHover({ isDisabled: dragging });
+  const { focusProps, isFocusVisible } = useFocusRing();
+
+  const scale = dragging ? 1.05 : isHovered ? 1.03 : 1;
+  const size = brickSize(1, spec.rows);
 
   return (
     <>
       <div
         className={cn(
           "absolute border-[1.5px] border-dashed border-[#d4d4d4] dark:border-[#3a3c42] rounded-[11px] opacity-0 pointer-events-none z-1 transition-[opacity,transform] [transition-duration:.18s,.12s]",
-          spec.slotClassName,
+          spec.pos,
+          spec.tint,
           slot && "opacity-100",
         )}
-        style={slot ? { transform: `translate(${slot.x}px,${slot.y}px)` } : undefined}
+        style={{ ...size, transform: slot ? `translate(${slot.x}px,${slot.y}px)` : undefined }}
       />
-      {/* eslint-disable-next-line @next/next/no-img-element -- decorative SVG with pointer handlers */}
-      <img
-        ref={img}
+      <LegoBrick
+        ref={ref}
+        color={spec.color}
+        rows={spec.rows}
+        data-brick={spec.color}
+        tabIndex={0}
+        role="button"
+        aria-roledescription="draggable brick"
+        aria-label={`${spec.color} brick. Drag it, or use the arrow keys, to move it.`}
+        {...mergeProps(moveProps, hoverProps, focusProps)}
         className={cn(
-          "absolute block cursor-grab select-none [-webkit-user-drag:none] touch-none will-change-transform",
+          "absolute cursor-grab select-none touch-none will-change-transform",
+          // `translate`/`scale` rather than `transform`, so they add to the entrance animation's transform:
+          // when Next re-shows the page the animation replays, and a moved brick rises in at its new spot
           "transition-[translate,scale] duration-180 animate-[riseIn_.75s_var(--ease-enter)_backwards] motion-reduce:animate-none!",
+          spec.pos,
           spec.className,
-          phase === "dragging" && "cursor-grabbing transition-none z-6",
+          dragging && "cursor-grabbing transition-none z-6",
           phase === "settling" && "duration-340 ease-[cubic-bezier(.2,.8,.25,1)] z-6",
+          isFocusVisible ? "outline-2 outline-solid outline-offset-4 outline-ink" : "outline-none",
         )}
-        src={spec.src}
-        width={spec.width}
-        height={spec.height}
-        alt=""
-        draggable={false}
-        style={{ translate: `${o.x}px ${o.y}px`, scale }}
-        onPointerEnter={() => !dragging && setHover(true)}
-        onPointerLeave={() => !dragging && setHover(false)}
-        onPointerDown={onPointerDown}
+        style={{ translate: `${offset.x}px ${offset.y}px`, scale }}
       />
     </>
   );
@@ -211,10 +220,11 @@ export function Legos() {
         // phones: bricks side by side at 75%, centred; the negative margin gives back the scaled-away height
         "below-720:h-[170px] below-720:origin-top below-720:[transform:scale(.75)_translateX(-29px)] below-720:-mb-[42px]",
       )}
-      aria-hidden="true"
+      role="group"
+      aria-label="Bricks"
     >
       {BRICKS.map((b) => (
-        <Brick key={b.src} spec={b} />
+        <Brick key={b.color} spec={b} />
       ))}
     </div>
   );

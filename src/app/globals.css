@@ -152,6 +152,12 @@
   }
 }
 
+/* iOS Safari zooms the page into any focused field whose text is under 16px. Fields there get 16px
+   (iOS only, so other browsers keep the design's 14px). Unlayered, so it outranks the text-* utilities. */
+@supports (-webkit-touch-callout: none) {
+  input, textarea, select { font-size: 16px; }
+}
+
 /* ---- keyframes ---- */
 @keyframes spin-angle { to { --angle: 360deg; } }
 @keyframes dropIn { from { opacity: 0; transform: translateY(-18px); } to { opacity: 1; transform: translateY(0); } }

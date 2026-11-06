@@ -22,7 +22,7 @@ export default function Home() {
     <>
       <AppEffects />
       <Pegboard />
-      <div className="relative max-w-[1440px] mx-auto min-h-full" id="frame">
+      <div className="relative max-w-[1440px] mx-auto min-h-dvh" id="frame">
         <Rail side="l" />
         <Rail side="r" />
         <Topbar variant="home" />

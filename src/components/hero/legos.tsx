@@ -74,9 +74,9 @@ function Brick({ spec }: { spec: BrickSpec }) {
 
   const dragging = phase === "dragging";
   const scale = dragging ? 1.05 : hover ? 1.03 : 1;
-  // no inline transform until first interaction, so the entrance animation owns it
+  // `translate`/`scale` rather than `transform`, so they add to the entrance animation's transform:
+  // when Next re-shows the page the animation replays, and a moved brick rises in at its new spot
   const o = offset ?? { x: 0, y: 0 };
-  const transform = offset || hover ? `translate(${o.x}px,${o.y}px) scale(${scale})` : undefined;
 
   function onPointerDown(e: ReactPointerEvent<HTMLImageElement>) {
     e.preventDefault();
@@ -140,7 +140,7 @@ function Brick({ spec }: { spec: BrickSpec }) {
       <img
         className={cn(
           "absolute block cursor-grab select-none [-webkit-user-drag:none] touch-none will-change-transform",
-          "transition-[transform] duration-180 animate-[riseIn_.75s_var(--ease-enter)_backwards] motion-reduce:animate-none!",
+          "transition-[translate,scale] duration-180 animate-[riseIn_.75s_var(--ease-enter)_backwards] motion-reduce:animate-none!",
           spec.className,
           phase === "dragging" && "cursor-grabbing transition-none z-6",
           phase === "settling" && "duration-340 ease-[cubic-bezier(.2,.8,.25,1)] z-6",
@@ -150,7 +150,7 @@ function Brick({ spec }: { spec: BrickSpec }) {
         height={spec.height}
         alt=""
         draggable={false}
-        style={{ transform }}
+        style={{ translate: `${o.x}px ${o.y}px`, scale }}
         onPointerEnter={() => !dragging && setHover(true)}
         onPointerLeave={() => !dragging && setHover(false)}
         onPointerDown={onPointerDown}

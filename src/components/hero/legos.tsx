@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { peekAt } from "@/components/pegboard";
 import { playBrickClick, preloadBrickSound } from "@/lib/brick-sound";
 import { cn } from "@/lib/cn";
@@ -60,6 +60,36 @@ function dropBounds() {
   return { lx, rx, top: f.top + 70, bottom: f.top + Math.min(f.height - 12, 796) };
 }
 
+/** Whether the brick's visible body sits between the rails and clear of page content. */
+function fits(el: HTMLElement, spec: BrickSpec) {
+  const r = el.getBoundingClientRect();
+  const rb = dropBounds();
+  const left = r.left + spec.inset, right = left + spec.visibleWidth;
+  return left >= rb.lx && right <= rb.rx && !overlaps(r, contentRects());
+}
+
+/** Runs `fn` now, on every (frame-throttled) resize, and whenever Next shows the page again (it re-runs effects then). */
+function useOnResize(fn: () => void) {
+  const latest = useRef(fn);
+  useLayoutEffect(() => {
+    latest.current = fn;
+  });
+  useEffect(() => {
+    let raf = 0;
+    const run = () => latest.current();
+    function onResize() {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(run);
+    }
+    run();
+    window.addEventListener("resize", onResize);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onResize);
+    };
+  }, []);
+}
+
 type Phase = "idle" | "dragging" | "settling";
 
 function Brick({ spec }: { spec: BrickSpec }) {
@@ -69,8 +99,25 @@ function Brick({ spec }: { spec: BrickSpec }) {
   const [slot, setSlot] = useState<{ x: number; y: number } | null>(null);
   const pos = useRef({ x: 0, y: 0 });
   const settleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const img = useRef<HTMLImageElement>(null);
 
   useEffect(() => () => clearTimeout(settleTimer.current), []);
+
+  /** Ease the brick to `pos` (wherever it was just set). */
+  function settle() {
+    setOffset({ ...pos.current });
+    setPhase("settling");
+    clearTimeout(settleTimer.current);
+    settleTimer.current = setTimeout(() => setPhase("idle"), 380);
+  }
+
+  // a narrower window pulls the rails in, which can leave a moved brick outside them: send it home
+  useOnResize(() => {
+    const el = img.current;
+    if (!el?.offsetParent || (pos.current.x === 0 && pos.current.y === 0) || fits(el, spec)) return;
+    pos.current = { x: 0, y: 0 };
+    settle();
+  });
 
   const dragging = phase === "dragging";
   const scale = dragging ? 1.05 : hover ? 1.03 : 1;
@@ -90,7 +137,6 @@ function Brick({ spec }: { spec: BrickSpec }) {
     const r0 = el.getBoundingClientRect();
     const baseLeft = r0.left - start.x, baseTop = r0.top - start.y, w = r0.width, h = r0.height;
     const rb = dropBounds();
-    const blocked = contentRects();
     try { el.setPointerCapture(e.pointerId); } catch {}
 
     function move(ev: PointerEvent) {
@@ -105,18 +151,13 @@ function Brick({ spec }: { spec: BrickSpec }) {
     }
     function up() {
       setHover(false);
-      const r = el.getBoundingClientRect();
-      const left = r.left + spec.inset, right = left + spec.visibleWidth; // the visible brick edges
-      const invalid = left < rb.lx || right > rb.rx || overlaps(r, blocked);
-      if (invalid) pos.current = start; // ease back to the previous spot
+      if (!fits(el, spec)) pos.current = start; // ease back to the previous spot
       else {
         pos.current = { x: Math.round(pos.current.x / GRID) * GRID, y: Math.round(pos.current.y / GRID) * GRID };
         playBrickClick();
       }
-      setOffset({ ...pos.current });
-      setPhase("settling");
+      settle();
       setSlot(null);
-      settleTimer.current = setTimeout(() => setPhase("idle"), 380);
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", up);
@@ -138,6 +179,7 @@ function Brick({ spec }: { spec: BrickSpec }) {
       />
       {/* eslint-disable-next-line @next/next/no-img-element -- decorative SVG with pointer handlers */}
       <img
+        ref={img}
         className={cn(
           "absolute block cursor-grab select-none [-webkit-user-drag:none] touch-none will-change-transform",
           "transition-[translate,scale] duration-180 animate-[riseIn_.75s_var(--ease-enter)_backwards] motion-reduce:animate-none!",
